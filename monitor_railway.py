@@ -3,66 +3,119 @@ import time
 import hashlib
 from collections import deque
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
-# --- DEBUG: Lendo variáveis do Railway ---
+# ============================
+# 🔍 DEBUG – Variáveis do Railway
+# ============================
 print("🔍 [DEBUG] Lendo variáveis de ambiente do Railway...")
 print("API_ID =", os.getenv("API_ID"))
 print("API_HASH =", os.getenv("API_HASH"))
+print("STRING_SESSION =", "OK" if os.getenv("STRING_SESSION") else "NÃO DEFINIDA!")
 print("CHAT_ID =", os.getenv("CHAT_ID"))
 print("GRUPOS =", os.getenv("GRUPOS"))
 print("KEYWORDS =", os.getenv("KEYWORDS"))
 
-# --- Variáveis com fallback (funciona local também) ---
-api_id = int(os.getenv("API_ID") or "27867189")
-api_hash = os.getenv("API_HASH") or "aae51a8a046989834c4c50e1188e8dc6"
-chat_id = int(os.getenv("CHAT_ID") or "810381547")  # ID da conta principal que recebe alertas
+# ============================
+# 🔧 CONFIGS
+# ============================
+api_id = int(os.getenv("API_ID"))
+api_hash = os.getenv("API_HASH")
+string_session = os.getenv("STRING_SESSION")
 
-# --- Grupos monitorados ---
-grupos_env = os.getenv("GRUPOS") or "-1001904527261"
+chat_id = int(os.getenv("CHAT_ID"))
+
+# Grupos monitorados
+grupos_env = os.getenv("GRUPOS") or ""
 grupos_monitorados = [int(g.strip()) for g in grupos_env.split(",") if g.strip()]
 
-# --- Palavras-chave monitoradas ---
-palavras_chave = [p.strip().lower() for p in (os.getenv("KEYWORDS") or "promoção,oferta,bug").split(",")]
+# Palavras-chave
+palavras_chave = [
+    p.strip().lower()
+    for p in (os.getenv("KEYWORDS") or "").split(",")
+    if p.strip()
+]
 
-# --- Proteções ---
-mensagens_enviadas = deque(maxlen=50)  # últimos 50 hashes
-ultimo_alerta = {}  # palavra-chave -> timestamp
-tempo_cooldown = 300  # segundos de espera por palavra (5 min)
+# Anti-repetição
+mensagens_enviadas = deque(maxlen=100)
+ultimo_alerta = {}
+tempo_cooldown = 300  # 5 minutos
 
-# --- Cliente Telegram com conta pessoal ---
-client = TelegramClient('monitor_railway', api_id, api_hash)
+# ============================
+# 🔐 Inicialização do cliente (userbot)
+# ============================
+client = TelegramClient(
+    StringSession(string_session),
+    api_id,
+    api_hash
+)
 
-# --- Handler principal de mensagens ---
+# ============================
+# 📣 Mensagem ao iniciar
+# ============================
+async def notificar_inicio():
+    try:
+        await client.send_message(
+            chat_id,
+            "✅ Bot de ofertas iniciado e monitorando grupos."
+        )
+    except Exception as e:
+        print(f"⚠️ Erro ao notificar início: {e}")
+
+# ============================
+# 📡 Handler principal
+# ============================
 @client.on(events.NewMessage(chats=tuple(grupos_monitorados)))
 async def handler(event):
-    texto = event.raw_text
-    mensagem = texto.lower()
+
+    texto = event.raw_text or ""
+    mensagem_lower = texto.lower()
 
     for palavra in palavras_chave:
-        if palavra in mensagem:
+        if palavra.lower() in mensagem_lower:
+
             agora = time.time()
 
-            # Cooldown por palavra
+            # Cooldown
             if palavra in ultimo_alerta:
                 if agora - ultimo_alerta[palavra] < tempo_cooldown:
                     return
 
-            # Hash anti-repetição
+            # Anti repetição
             hash_mensagem = hashlib.sha256(texto.encode()).hexdigest()
             if hash_mensagem in mensagens_enviadas:
                 return
 
-            # Atualiza controles
-            ultimo_alerta[palavra] = agora
             mensagens_enviadas.append(hash_mensagem)
+            ultimo_alerta[palavra] = agora
 
-            # Envia alerta pela conta pessoal
-            alerta = f"🔥 Palavra-chave '{palavra}' encontrada no grupo {event.chat.title}:\n\n{texto[:300]}"
-            await client.send_message(chat_id, alerta)
+            # ======================
+            # ⚠️ Correção do crash: event.chat pode ser None
+            # ======================
+            try:
+                chat = await event.get_chat()
+                nome_grupo = getattr(chat, "title", "grupo desconhecido")
+            except:
+                nome_grupo = "grupo desconhecido"
+
+            alerta = (
+                f"🔥 Palavra-chave '{palavra}' encontrada no grupo **{nome_grupo}**:\n\n"
+                f"{texto[:300]}"
+            )
+
+            try:
+                await client.send_message(chat_id, alerta)
+                print(f"📤 Alerta enviado ({palavra}) – {nome_grupo}")
+            except Exception as e:
+                print(f"❌ Erro ao enviar alerta: {e}")
+
             break
 
-# --- Inicialização do cliente ---
-print("✅ Bot de ofertas iniciado (usando client.send_message)...")
+# ============================
+# ▶️ Execução
+# ============================
+print("✅ Bot de ofertas iniciado (userbot + StringSession)...")
 
 with client:
+    client.loop.run_until_complete(notificar_inicio())
     client.run_until_disconnected()
