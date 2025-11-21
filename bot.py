@@ -6,7 +6,7 @@ from collections import deque
 
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError, RpcError
+from telethon.errors import FloodWaitError, RPCError
 
 # ============================
 # DEBUG – Variáveis do Railway
@@ -142,7 +142,7 @@ def criar_cliente() -> TelegramClient:
                 except FloodWaitError as fw:
                     print(f"⏳ FloodWait: aguardando {fw.seconds} segundos.")
                     time.sleep(fw.seconds)
-                except RpcError as e:
+                except RPCError as e:
                     print(f"❌ Erro RPC ao enviar alerta: {e}")
                     traceback.print_exc()
                 except Exception as e:
